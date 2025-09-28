@@ -15,6 +15,10 @@ import pytz
 import psycopg2
 from psycopg2.extras import RealDictCursor
 
+# Загружаем переменные окружения из .env
+from dotenv import load_dotenv
+load_dotenv()
+
 # Настройка логирования
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -80,11 +84,11 @@ def create_calendar(year=None, month=None):
 # ========== РАБОТА С БД ==========
 def get_db_connection():
     return psycopg2.connect(
-        host="194.187.122.181",   # ← ваш IP из скриншота
-        port=5432,
-        database="default_db",         # ← замените на реальное имя вашей БД
-        user="gen_user",          # ← замените на реального пользователя
-        password="68fz{cn.WLF7A%"     # ← пароль из настроек БД (не звёздочки!)
+        host=os.getenv("DB_HOST"),
+        port=int(os.getenv("DB_PORT")),
+        database=os.getenv("DB_NAME"),
+        user=os.getenv("DB_USER"),
+        password=os.getenv("DB_PASS")
     )
 
 def init_db():
@@ -198,7 +202,7 @@ async def show_status_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 current_date = date_val
                 msg += f"\n🗓️ {current_date}:\n"
             msg += f"  👤 {username}: {status}\n"
-        await update.message.reply_text(msg)  # Без MarkdownV2!
+        await update.message.reply_text(msg)
 
 async def clear_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -306,7 +310,7 @@ async def post_init(application: Application) -> None:
 
 def main():
     init_db()
-    TOKEN = "7252426165:AAGeO7Tfd5SS_aRZT8ySEcm3L2rUTcASZKQ"  # ← ваш токен
+    TOKEN = os.getenv("TELEGRAM_TOKEN")
 
     application = Application.builder().token(TOKEN).post_init(post_init).build()
 
@@ -334,7 +338,7 @@ def main():
 
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("status", show_status_all))
-    application.add_handler(CommandHandler("clearstatus", clear_status))  # ← новая команда
+    application.add_handler(CommandHandler("clearstatus", clear_status))
     application.add_handler(conv_handler)
     application.add_handler(period_conv_handler)
     application.add_handler(CallbackQueryHandler(calendar_handler))
