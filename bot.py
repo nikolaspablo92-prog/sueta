@@ -182,12 +182,22 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     chat_id = update.effective_chat.id
     add_user(user.id, user.username or user.first_name, chat_id)
+
+    # Создаем клавиатуру с кнопками
+    keyboard = [
+        ["/start", "/setstatus"],
+        ["/calendar", "/status"],
+        ["/clearstatus"]
+    ]
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
+
     await update.message.reply_text(
         f"Привет, {user.first_name}! 👋\n"
         "🔹 /setstatus — статус на сегодня\n"
         "🔹 /calendar — статус на период\n"
         "🔹 /status — статусы команды за неделю\n"
-        "🔹 /clearstatus — удалить мой статус на сегодня"
+        "🔹 /clearstatus — удалить мой статус на сегодня",
+        reply_markup=reply_markup
     )
 
 async def show_status_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
