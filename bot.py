@@ -161,7 +161,35 @@ def delete_user_status_today(user_id):
     cur.close()
     conn.close()
     return deleted > 0
+    
+def delete_user_status_by_date(user_id, target_date):
+    """Удаляет статус пользователя на указанную дату."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute('''
+        DELETE FROM statuses
+        WHERE user_id = %s AND date = %s
+    ''', (user_id, target_date))
+    deleted = cur.rowcount
+    conn.commit()
+    cur.close()
+    conn.close()
+    return deleted > 0
 
+def delete_all_user_statuses(user_id):
+    """Удаляет ВСЕ статусы пользователя."""
+    conn = get_db_connection()
+    cur = conn.cursor()
+    cur.execute('''
+        DELETE FROM statuses
+        WHERE user_id = %s
+    ''', (user_id,))
+    deleted = cur.rowcount
+    conn.commit()
+    cur.close()
+    conn.close()
+    return deleted
+    
 def get_statuses_last_week():
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=RealDictCursor)
@@ -220,6 +248,29 @@ async def clear_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("🗑️ Ваш статус на сегодня удалён.")
     else:
         await update.message.reply_text("ℹ️ У вас нет статуса на сегодня.")
+        
+async def clear_by_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if len(context.args) != 1:
+        await update.message.reply_text("Используй: /clearbydate YYYY-MM-DD")
+        return
+    try:
+        target_date = datetime.strptime(context.args[0], "%Y-%m-%d").date()
+    except ValueError:
+        await update.message.reply_text("Неверный формат даты. Используй: YYYY-MM-DD")
+        return
+    user_id = update.effective_user.id
+    if delete_user_status_by_date(user_id, target_date):
+        await update.message.reply_text(f"🗑️ Ваш статус на {target_date} удалён.")
+    else:
+        await update.message.reply_text(f"ℹ️ У вас нет статуса на {target_date}.")
+
+async def clear_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user_id = update.effective_user.id
+    deleted_count = delete_all_user_statuses(user_id)
+    if deleted_count > 0:
+        await update.message.reply_text(f"🗑️ Все ваши статусы удалены ({deleted_count} записей).")
+    else:
+        await update.message.reply_text("ℹ️ У вас нет сохранённых статусов.")
 
 async def set_status_manually(update: Update, context: ContextTypes.DEFAULT_TYPE):
     keyboard = [[status] for status in PRESET_STATUSES] + [["✏️ Написать свой"]]
@@ -349,6 +400,8 @@ def main():
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("status", show_status_all))
     application.add_handler(CommandHandler("clearstatus", clear_status))
+    application.add_handler(CommandHandler("clearbydate", clear_by_date))
+    application.add_handler(CommandHandler("clearall", clear_all))
     application.add_handler(conv_handler)
     application.add_handler(period_conv_handler)
     application.add_handler(CallbackQueryHandler(calendar_handler))
