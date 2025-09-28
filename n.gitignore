@@ -1,4 +1,19 @@
+# Игнорировать файл с паролями
 .env
+
+# Игнорировать виртуальное окружение
 venv/
+ENV/
+env/
+
+# Игнорировать кэш Python
 __pycache__/
 *.pyc
+*.pyo
+*.pyd
+.Python
+.ipynb_checkpoints
+
+# Игнорировать системные файлы
+.DS_Store
+Thumbs.db
