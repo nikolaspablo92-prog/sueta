@@ -1,0 +1,58 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Статусы команды</title>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 20px; }
+        table { border-collapse: collapse; width: 100%; margin-top: 20px; }
+        th, td { border: 1px solid #ddd; padding: 12px; text-align: left; }
+        th { background-color: #f2f2f2; }
+        .status { padding: 4px 8px; border-radius: 4px; }
+        .work { background-color: #d4edda; color: #155724; }
+        .home { background-color: #cce5ff; color: #004085; }
+        .vacation { background-color: #fff3cd; color: #856404; }
+        .sick { background-color: #f8d7da; color: #721c24; }
+        .trip { background-color: #d1ecf1; color: #0c5460; }
+    </style>
+</head>
+<body>
+    <h1>📊 Статусы команды за последние 7 дней</h1>
+    
+    {% if statuses %}
+        <table>
+            <thead>
+                <tr>
+                    <th>Дата</th>
+                    <th>Сотрудник</th>
+                    <th>Статус</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for date_val, username, status in statuses %}
+                <tr>
+                    <td>{{ date_val }}</td>
+                    <td><strong>{{ username }}</strong></td>
+                    <td>
+                        <span class="status 
+                            {% if 'На работе' in status %}work
+                            {% elif 'Дома' in status %}home
+                            {% elif 'В отпуске' in status %}vacation
+                            {% elif 'Болею' in status %}sick
+                            {% elif 'В командировке' in status %}trip
+                            {% endif %}">
+                            {{ status }}
+                        </span>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    {% else %}
+        <p>Нет статусов за последние 7 дней.</p>
+    {% endif %}
+
+    <p><small>Обновлено: {{ now }}</small></p>
+</body>
+</html>
