@@ -19,6 +19,9 @@ from psycopg2.extras import RealDictCursor
 from dotenv import load_dotenv
 load_dotenv()
 
+# Глобальная переменная для доступа к application из планировщика
+app = None
+
 # Настройка логирования
 logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
@@ -130,6 +133,16 @@ def add_user(user_id, username, chat_id):
     cur.close()
     conn.close()
 
+def get_active_users(chat_id):
+    """Возвращает активных пользователей для чата."""
+    conn = get_db_connection()
+    cur = conn.cursor(cursor_factory=RealDictCursor)
+    cur.execute('SELECT user_id, username FROM users WHERE chat_id = %s AND is_active = TRUE', (chat_id,))
+    result = cur.fetchall()
+    cur.close()
+    conn.close()
+    return [(row['user_id'], row['username']) for row in result]
+
 def save_status_for_date(user_id, chat_id, status_text, target_date):
     conn = get_db_connection()
     cur = conn.cursor()
@@ -161,9 +174,8 @@ def delete_user_status_today(user_id):
     cur.close()
     conn.close()
     return deleted > 0
-    
+
 def delete_user_status_by_date(user_id, target_date):
-    """Удаляет статус пользователя на указанную дату."""
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute('''
@@ -177,7 +189,6 @@ def delete_user_status_by_date(user_id, target_date):
     return deleted > 0
 
 def delete_all_user_statuses(user_id):
-    """Удаляет ВСЕ статусы пользователя."""
     conn = get_db_connection()
     cur = conn.cursor()
     cur.execute('''
@@ -189,7 +200,7 @@ def delete_all_user_statuses(user_id):
     cur.close()
     conn.close()
     return deleted
-    
+
 def get_statuses_last_week():
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=RealDictCursor)
@@ -205,17 +216,51 @@ def get_statuses_last_week():
     conn.close()
     return [(row['username'], row['status_text'], row['date']) for row in result]
 
+# ========== ЕЖЕДНЕВНЫЙ ОПРОС ==========
+async def daily_poll_job():
+    """Отправляет ежедневный опрос всем активным пользователям."""
+    global app
+    if app is None:
+        logger.error("Application not initialized!")
+        return
+
+    try:
+        # Получаем все уникальные chat_id с активными пользователями
+        conn = get_db_connection()
+        cur = conn.cursor()
+        cur.execute('SELECT DISTINCT chat_id FROM users WHERE is_active = TRUE')
+        chat_ids = [row[0] for row in cur.fetchall()]
+        cur.close()
+        conn.close()
+
+        for chat_id in chat_ids:
+            users = get_active_users(chat_id)
+            for user_id, username in users:
+                try:
+                    keyboard = [[status] for status in PRESET_STATUSES] + [["✏️ Написать свой"]]
+                    reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
+                    await app.bot.send_message(
+                        chat_id=user_id,
+                        text="📆 Как твой статус сегодня?",
+                        reply_markup=reply_markup
+                    )
+                    logger.info(f"Отправлен опрос пользователю {user_id}")
+                except Exception as e:
+                    logger.warning(f"Не удалось отправить сообщение пользователю {user_id}: {e}")
+    except Exception as e:
+        logger.error(f"Ошибка в daily_poll_job: {e}")
+
 # ========== ОБРАБОТЧИКИ ==========
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = update.effective_user
     chat_id = update.effective_chat.id
     add_user(user.id, user.username or user.first_name, chat_id)
 
-    # Создаем клавиатуру с кнопками
     keyboard = [
         ["/start", "/setstatus"],
         ["/calendar", "/status"],
-        ["/clearstatus"]
+        ["/clearstatus", "/clearbydate"],
+        ["/clearall"]
     ]
     reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
 
@@ -224,7 +269,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🔹 /setstatus — статус на сегодня\n"
         "🔹 /calendar — статус на период\n"
         "🔹 /status — статусы команды за неделю\n"
-        "🔹 /clearstatus — удалить мой статус на сегодня",
+        "🔹 /clearstatus — удалить статус на сегодня\n"
+        "🔹 /clearbydate — удалить статус на дату\n"
+        "🔹 /clearall — удалить все статусы",
         reply_markup=reply_markup
     )
 
@@ -248,7 +295,7 @@ async def clear_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("🗑️ Ваш статус на сегодня удалён.")
     else:
         await update.message.reply_text("ℹ️ У вас нет статуса на сегодня.")
-        
+
 async def clear_by_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(context.args) != 1:
         await update.message.reply_text("Используй: /clearbydate YYYY-MM-DD")
@@ -367,7 +414,12 @@ async def custom_status_period(update: Update, context: ContextTypes.DEFAULT_TYP
 
 # ========== ЗАПУСК ==========
 async def post_init(application: Application) -> None:
-    logger.info("Бот запущен")
+    global app
+    app = application
+    scheduler = AsyncIOScheduler(timezone=pytz.timezone('Europe/Moscow'))
+    scheduler.add_job(daily_poll_job, 'cron', hour=9, minute=0)
+    scheduler.start()
+    logger.info("Планировщик запущен: ежедневный опрос в 9:00 по Москве")
 
 def main():
     init_db()
