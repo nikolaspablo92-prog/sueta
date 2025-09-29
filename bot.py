@@ -469,8 +469,7 @@ def main():
     application.add_handler(CommandHandler("clearall", clear_all))
     application.add_handler(conv_handler)
     application.add_handler(period_conv_handler)
-    application.add_handler(clear_conv_handler)  # НОВАЯ СТРОКА
-    application.add_handler(CallbackQueryHandler(calendar_handler))
+    application.add_handler(clear_conv_handler)  # ЕДИНСТВЕННЫЙ обработчик для календаря
 
     application.run_polling()
 
