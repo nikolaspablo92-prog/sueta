@@ -30,8 +30,8 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Состояния
-CHOOSING, TYPING_REPLY, SELECTING_START_DATE, SELECTING_END_DATE = range(4)
+# Состояния (добавлено SELECTING_CLEAR_DATE)
+CHOOSING, TYPING_REPLY, SELECTING_START_DATE, SELECTING_END_DATE, SELECTING_CLEAR_DATE = range(5)
 
 # Предустановленные статусы
 PRESET_STATUSES = ["✅ На работе", "🏠 Дома", "🌴 В отпуске", "🤒 Болею", "✈️ В командировке"]
@@ -270,7 +270,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         "🔹 /calendar — статус на период\n"
         "🔹 /status — статусы команды за неделю\n"
         "🔹 /clearstatus — удалить статус на сегодня\n"
-        "🔹 /clearbydate — удалить статус на дату\n"
+        "🔹 /clearbydate — удалить статус на дату (через календарь)\n"
         "🔹 /clearall — удалить все статусы",
         reply_markup=reply_markup
     )
@@ -296,20 +296,12 @@ async def clear_status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     else:
         await update.message.reply_text("ℹ️ У вас нет статуса на сегодня.")
 
-async def clear_by_date(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if len(context.args) != 1:
-        await update.message.reply_text("Используй: /clearbydate YYYY-MM-DD")
-        return
-    try:
-        target_date = datetime.strptime(context.args[0], "%Y-%m-%d").date()
-    except ValueError:
-        await update.message.reply_text("Неверный формат даты. Используй: YYYY-MM-DD")
-        return
-    user_id = update.effective_user.id
-    if delete_user_status_by_date(user_id, target_date):
-        await update.message.reply_text(f"🗑️ Ваш статус на {target_date} удалён.")
-    else:
-        await update.message.reply_text(f"ℹ️ У вас нет статуса на {target_date}.")
+# НОВАЯ ФУНКЦИЯ: запуск календаря для удаления
+async def clear_by_date_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.clear()
+    context.user_data["mode"] = "clear"  # Устанавливаем режим удаления
+    await update.message.reply_text("Выбери дату для удаления статуса:", reply_markup=create_calendar())
+    return SELECTING_CLEAR_DATE
 
 async def clear_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = update.effective_user.id
@@ -369,6 +361,18 @@ async def calendar_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data.startswith("cal:"):
         _, date_str = data.split(":", 1)
         selected_date = datetime.strptime(date_str, "%Y-%m-%d").date()
+        
+        # Режим удаления статуса
+        if context.user_data.get("mode") == "clear":
+            user_id = query.from_user.id
+            if delete_user_status_by_date(user_id, selected_date):
+                await query.edit_message_text(f"🗑️ Ваш статус на {selected_date} удалён.")
+            else:
+                await query.edit_message_text(f"ℹ️ У вас нет статуса на {selected_date}.")
+            context.user_data.clear()
+            return ConversationHandler.END
+        
+        # Режим установки периода (старый код)
         if context.user_data.get("start_date") is None:
             context.user_data["start_date"] = selected_date
             await query.edit_message_text(f"Начало: {selected_date}\nТеперь выбери дату окончания:", reply_markup=create_calendar(selected_date.year, selected_date.month))
@@ -449,13 +453,23 @@ def main():
         per_user=True
     )
 
+    # НОВЫЙ ОБРАБОТЧИК для удаления через календарь
+    clear_conv_handler = ConversationHandler(
+        entry_points=[CommandHandler("clearbydate", clear_by_date_start)],
+        states={
+            SELECTING_CLEAR_DATE: [CallbackQueryHandler(calendar_handler)],
+        },
+        fallbacks=[],
+        per_user=True
+    )
+
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("status", show_status_all))
     application.add_handler(CommandHandler("clearstatus", clear_status))
-    application.add_handler(CommandHandler("clearbydate", clear_by_date))
     application.add_handler(CommandHandler("clearall", clear_all))
     application.add_handler(conv_handler)
     application.add_handler(period_conv_handler)
+    application.add_handler(clear_conv_handler)  # НОВАЯ СТРОКА
     application.add_handler(CallbackQueryHandler(calendar_handler))
 
     application.run_polling()
