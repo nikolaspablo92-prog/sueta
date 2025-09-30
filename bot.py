@@ -30,7 +30,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Состояния (добавлено SELECTING_CLEAR_DATE)
+# Состояния
 CHOOSING, TYPING_REPLY, SELECTING_START_DATE, SELECTING_END_DATE, SELECTING_CLEAR_DATE = range(5)
 
 # Предустановленные статусы
@@ -238,7 +238,7 @@ async def daily_poll_job():
             for user_id, username in users:
                 try:
                     keyboard = [[status] for status in PRESET_STATUSES] + [["✏️ Написать свой"]]
-                    reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
+                    reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=False, resize_keyboard=True)
                     await app.bot.send_message(
                         chat_id=user_id,
                         text="📆 Как твой статус сегодня?",
@@ -416,6 +416,51 @@ async def custom_status_period(update: Update, context: ContextTypes.DEFAULT_TYP
     context.user_data.clear()
     return ConversationHandler.END
 
+# ========== НОВАЯ ФУНКЦИЯ: обработка ответов на опрос ==========
+async def handle_poll_response(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Обрабатывает ответ на утренний опрос и другие текстовые сообщения."""
+    text = update.message.text
+    user_id = update.effective_user.id
+    chat_id = update.effective_chat.id
+    
+    # Если пользователь пишет "Отмена" при вводе кастомного статуса
+    if text == "Отмена" and context.user_data.get("awaiting_custom_status"):
+        await update.message.reply_text("Отменено.")
+        context.user_data.pop("awaiting_custom_status", None)
+        return
+    
+    # Если ожидаем кастомный статус
+    if context.user_data.get("awaiting_custom_status"):
+        save_status_for_date(user_id, chat_id, text, date.today())
+        await update.message.reply_text("✅ Статус на сегодня сохранён!")
+        context.user_data.pop("awaiting_custom_status", None)
+        return
+    
+    # Обработка стандартных статусов
+    if text in PRESET_STATUSES:
+        save_status_for_date(user_id, chat_id, text, date.today())
+        await update.message.reply_text("✅ Статус на сегодня сохранён!")
+        return
+    
+    # Обработка кнопки "Написать свой"
+    if text == "✏️ Написать свой":
+        await update.message.reply_text("Напиши свой статус:", reply_markup=ReplyKeyboardMarkup([["Отмена"]], resize_keyboard=True))
+        context.user_data["awaiting_custom_status"] = True
+        return
+    
+    # Если ничего не подошло — показываем меню
+    keyboard = [
+        ["/start", "/setstatus"],
+        ["/calendar", "/status"],
+        ["/clearstatus", "/clearbydate"],
+        ["/clearall"]
+    ]
+    reply_markup = ReplyKeyboardMarkup(keyboard, resize_keyboard=True, one_time_keyboard=False)
+    await update.message.reply_text(
+        "Выбери команду или статус:",
+        reply_markup=reply_markup
+    )
+
 # ========== ЗАПУСК ==========
 async def post_init(application: Application) -> None:
     global app
@@ -431,7 +476,8 @@ def main():
 
     application = Application.builder().token(TOKEN).post_init(post_init).build()
 
-    conv_handler = ConversationHandler(
+    # Обработчик для ручной установки статуса (/setstatus)
+    manual_conv_handler = ConversationHandler(
         entry_points=[CommandHandler("setstatus", set_status_manually)],
         states={
             CHOOSING: [MessageHandler(filters.TEXT & ~filters.COMMAND, status_chosen)],
@@ -441,6 +487,7 @@ def main():
         per_user=True
     )
 
+    # Обработчики периодов и удаления (без изменений)
     period_conv_handler = ConversationHandler(
         entry_points=[CommandHandler("calendar", calendar_start)],
         states={
@@ -453,7 +500,6 @@ def main():
         per_user=True
     )
 
-    # НОВЫЙ ОБРАБОТЧИК для удаления через календарь
     clear_conv_handler = ConversationHandler(
         entry_points=[CommandHandler("clearbydate", clear_by_date_start)],
         states={
@@ -463,13 +509,19 @@ def main():
         per_user=True
     )
 
+    # Регистрация обработчиков
     application.add_handler(CommandHandler("start", start))
     application.add_handler(CommandHandler("status", show_status_all))
     application.add_handler(CommandHandler("clearstatus", clear_status))
     application.add_handler(CommandHandler("clearall", clear_all))
-    application.add_handler(conv_handler)
+    
+    # ВАЖНО: сначала специфичные обработчики, потом общий
+    application.add_handler(manual_conv_handler)
     application.add_handler(period_conv_handler)
-    application.add_handler(clear_conv_handler)  # ЕДИНСТВЕННЫЙ обработчик для календаря
+    application.add_handler(clear_conv_handler)
+    
+    # Общий обработчик для всех текстовых сообщений (включая ответы на опрос)
+    application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_poll_response))
 
     application.run_polling()
 
