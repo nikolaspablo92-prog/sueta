@@ -202,16 +202,19 @@ def delete_all_user_statuses(user_id):
     conn.close()
     return deleted
 
-def get_statuses_last_week():
+def get_statuses_next_week():
+    """Возвращает статусы команды на неделю вперёд (сегодня + 6 дней)."""
     conn = get_db_connection()
     cur = conn.cursor(cursor_factory=RealDictCursor)
+    today = date.today()
+    next_week = today + timedelta(days=6)
     cur.execute('''
         SELECT u.username, s.status_text, s.date
         FROM statuses s
         JOIN users u ON s.user_id = u.user_id
-        WHERE s.date >= CURRENT_DATE - INTERVAL '7 days'
-        ORDER BY s.date DESC, u.username
-    ''')
+        WHERE s.date BETWEEN %s AND %s
+        ORDER BY s.date, u.username
+    ''', (today, next_week))
     result = cur.fetchall()
     cur.close()
     conn.close()
@@ -292,7 +295,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"Привет, {user.first_name}! 👋\n"
         "🔹 /setstatus — статус на сегодня\n"
         "🔹 /calendar — статус на период\n"
-        "🔹 /status — статусы команды за неделю\n"
+        "🔹 /status — показать статусы команды на неделю\n"  # ← ОБНОВЛЕНО
         "🔹 /clearstatus — удалить статус на сегодня\n"
         "🔹 /clearbydate — удалить статус на дату (через календарь)\n"
         "🔹 /clearall — удалить все статусы",
@@ -300,11 +303,11 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def show_status_all(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    statuses = get_statuses_last_week()
+    statuses = get_statuses_next_week()  # ← ИЗМЕНЕНО: неделя вперёд
     if not statuses:
-        await update.message.reply_text("Нет статусов за последние 7 дней.")
+        await update.message.reply_text("Нет запланированных статусов на ближайшую неделю.")
     else:
-        msg = "📅 Статусы за последние 7 дней:\n\n"
+        msg = "📅 Статусы команды на неделю:\n\n"  # ← ОБНОВЛЕНО
         current_date = None
         for username, status, date_val in statuses:
             if current_date != date_val:
