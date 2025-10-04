@@ -1,6 +1,7 @@
 import logging
 import sys
 import os
+import calendar
 from datetime import date, datetime, timedelta
 from dateutil.relativedelta import relativedelta
 from telegram import Update, ReplyKeyboardMarkup, InlineKeyboardMarkup, InlineKeyboardButton
@@ -218,35 +219,58 @@ def get_statuses_last_week():
 
 # ========== ЕЖЕДНЕВНЫЙ ОПРОС ==========
 async def daily_poll_job():
-    """Отправляет ежедневный опрос всем активным пользователям."""
+    """Отправляет ежедневный опрос всем активным пользователям (кроме выходных и если статус уже установлен)."""
     global app
     if app is None:
         logger.error("Application not initialized!")
         return
 
     try:
-        # Получаем все уникальные chat_id с активными пользователями
+        today = date.today()
+        # Проверяем, что сегодня не выходной (0=Пн, 6=Вс)
+        if today.weekday() >= 5:  # 5=Сб, 6=Вс
+            logger.info("Сегодня выходной — опрос не отправляется")
+            return
+
         conn = get_db_connection()
         cur = conn.cursor()
-        cur.execute('SELECT DISTINCT chat_id FROM users WHERE is_active = TRUE')
-        chat_ids = [row[0] for row in cur.fetchall()]
+        
+        # Получаем всех активных пользователей
+        cur.execute('SELECT user_id, chat_id FROM users WHERE is_active = TRUE')
+        users = cur.fetchall()
         cur.close()
         conn.close()
 
-        for chat_id in chat_ids:
-            users = get_active_users(chat_id)
-            for user_id, username in users:
-                try:
-                    keyboard = [[status] for status in PRESET_STATUSES] + [["✏️ Написать свой"]]
-                    reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=False, resize_keyboard=True)
-                    await app.bot.send_message(
-                        chat_id=user_id,
-                        text="📆 Как твой статус сегодня?",
-                        reply_markup=reply_markup
-                    )
-                    logger.info(f"Отправлен опрос пользователю {user_id}")
-                except Exception as e:
-                    logger.warning(f"Не удалось отправить сообщение пользователю {user_id}: {e}")
+        for user_id, chat_id in users:
+            try:
+                # Проверяем, есть ли уже статус на сегодня
+                conn_check = get_db_connection()
+                cur_check = conn_check.cursor()
+                cur_check.execute('''
+                    SELECT 1 FROM statuses 
+                    WHERE user_id = %s AND date = %s
+                ''', (user_id, today))
+                status_exists = cur_check.fetchone() is not None
+                cur_check.close()
+                conn_check.close()
+
+                if status_exists:
+                    logger.info(f"Статус пользователя {user_id} на {today} уже установлен — опрос не отправляется")
+                    continue
+
+                # Отправляем опрос
+                keyboard = [[status] for status in PRESET_STATUSES] + [["✏️ Написать свой"]]
+                reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=False, resize_keyboard=True)
+                await app.bot.send_message(
+                    chat_id=user_id,
+                    text="📆 Как твой статус сегодня?",
+                    reply_markup=reply_markup
+                )
+                logger.info(f"Отправлен опрос пользователю {user_id}")
+                
+            except Exception as e:
+                logger.warning(f"Не удалось отправить сообщение пользователю {user_id}: {e}")
+                
     except Exception as e:
         logger.error(f"Ошибка в daily_poll_job: {e}")
 
